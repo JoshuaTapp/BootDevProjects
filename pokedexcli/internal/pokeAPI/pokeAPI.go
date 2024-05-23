@@ -5,28 +5,34 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/JoshuaTapp/BootDevProjects/pokedexcli/internal/pokecache"
 )
 
-var baseURL = "https://pokeapi.co/api/v2/"
-var location *Locations
-var cache *pokecache.Cache
+const baseURL = "https://pokeapi.co/api/v2/"
+
+var (
+	location           *Locations
+	locationAreaList   *LocationAreaList
+	locationAreaDetail *LocationAreaDetail
+	cache              *pokecache.Cache
+)
 
 type Locations struct {
-	Count     int     `json:"count"`
-	Next      *string `json:"next"`
-	Previous  *string `json:"previous"`
-	Locations []struct {
+	Count    int     `json:"count"`
+	Next     *string `json:"next"`
+	Previous *string `json:"previous"`
+	Results  []struct {
 		Name string `json:"name"`
 		URL  string `json:"url"`
 	} `json:"results"`
 }
 
-type Location struct {
+type LocationAreaList struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
 	Areas []struct {
 		Name string `json:"name"`
 		URL  string `json:"url"`
@@ -38,8 +44,6 @@ type Location struct {
 			URL  string `json:"url"`
 		} `json:"generation"`
 	} `json:"game_indices"`
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
 	Names []struct {
 		Language struct {
 			Name string `json:"name"`
@@ -53,84 +57,184 @@ type Location struct {
 	} `json:"region"`
 }
 
-func InitLocations() *Locations {
-	cache = pokecache.NewCache(time.Minute * 5)
+type LocationAreaDetail struct {
+	EncounterMethodRates []struct {
+		EncounterMethod struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"encounter_method"`
+		VersionDetails []struct {
+			Rate    int `json:"rate"`
+			Version struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			} `json:"version"`
+		} `json:"version_details"`
+	} `json:"encounter_method_rates"`
+	GameIndex int `json:"game_index"`
+	ID        int `json:"id"`
+	Location  struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"location"`
+	Name  string `json:"name"`
+	Names []struct {
+		Language struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"language"`
+		Name string `json:"name"`
+	} `json:"names"`
+	PokemonEncounters []struct {
+		Pokemon struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"pokemon"`
+		VersionDetails []struct {
+			EncounterDetails []struct {
+				Chance          int   `json:"chance"`
+				ConditionValues []any `json:"condition_values"`
+				MaxLevel        int   `json:"max_level"`
+				Method          struct {
+					Name string `json:"name"`
+					URL  string `json:"url"`
+				} `json:"method"`
+				MinLevel int `json:"min_level"`
+			} `json:"encounter_details"`
+			MaxChance int `json:"max_chance"`
+			Version   struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			} `json:"version"`
+		} `json:"version_details"`
+	} `json:"pokemon_encounters"`
+}
 
-	url := baseURL + "location?offset=0&limit=20"
+func fetchFromAPI(url string, v interface{}) error {
+	if cache == nil {
+		cache = pokecache.NewCache(time.Minute * 5)
+	}
+
+	// Check if the URL's data is in the cache
+	if data, found := cache.Get(url); found {
+		if err := json.Unmarshal(data, v); err != nil {
+			return fmt.Errorf("failed to unmarshal cached data: %w", err)
+		}
+		return nil
+	}
+
+	// Fetch data from API
+	res, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("http get request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Handle HTTP status codes
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("bad HTTP response: status code: %d", res.StatusCode)
+	}
+
+	// Unmarshal the JSON response
+	if err := json.Unmarshal(body, v); err != nil {
+		return fmt.Errorf("json unmarshal failed: %w", err)
+	}
+
+	// Add to cache
+	cache.Add(url, body)
+	return nil
+}
+
+func init() {
+	cache = pokecache.NewCache(time.Minute * 5)
+}
+
+func initLocations() *Locations {
 	location = new(Locations)
-	location.getNewData(url)
+	location.fetch(baseURL + "location-area?offset=0&limit=20")
 	return location
 }
 
 func GetLocations() *Locations {
 	if location == nil {
-		InitLocations()
+		return initLocations()
 	}
 	return location
 }
 
-// Handles the HTTP request to get the locations and unmarshal the JSON response.
-// Updates the receiver 'locations' struct with the response's data.
-func (l *Locations) getNewData(url string) {
-	if data, ok := cache.Get(url); ok {
-		err := json.Unmarshal(data, l)
-		if err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
-
-	res, err := http.Get(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-
-	//log.Default().Printf("Response body: %s\n", body)
-
-	if res.StatusCode < http.StatusOK && res.StatusCode >= http.StatusMultipleChoices {
-		log.Fatalf("Response failed with status code: %d and\nbody: %s\n", res.StatusCode, body)
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = json.Unmarshal(body, l)
-	if err != nil {
-		log.Fatalf("Error: %v\nFailed to unmarshal with json payload: %v\n", err, l)
-	} else {
-		cache.Add(url, body)
-	}
+func (l *Locations) fetch(url string) {
+	fetchFromAPI(url, l)
 }
 
 func (l *Locations) GetNext() error {
-	url := l.Next
-	if url == nil {
-		log.Default().Println("l.next is nil, unable to get next page")
-		return errors.New("no further new locations to get")
+	if l.Next == nil {
+		return errors.New("no further locations to get")
 	}
-	l.getNewData(*url)
+	l.fetch(*l.Next)
 	return nil
 }
 
 func (l *Locations) GetPrevious() error {
-	url := l.Previous
-	if url == nil {
-		log.Default().Println("l.previous is nil, unable to get previous page")
-		return errors.New("at start of locations list, cannot get previous page")
+	if l.Previous == nil {
+		return errors.New("at the start of locations list, cannot get previous page")
 	}
-	l.getNewData(*url)
+	l.fetch(*l.Previous)
 	return nil
 }
 
 func (l *Locations) PrintLocations() error {
-	if len(l.Locations) < 1 {
-		log.Default().Println("l.locations is empty, unable to print locations")
+	if len(l.Results) == 0 {
 		return errors.New("no locations to print")
 	}
-	for _, location := range l.Locations {
+	for _, location := range l.Results {
 		fmt.Println(location.Name)
 	}
 	return nil
+}
+
+func initLocationArea() *LocationAreaList {
+	locationAreaList = new(LocationAreaList)
+	return locationAreaList
+}
+
+func GetLocationArea() *LocationAreaList {
+	if locationAreaList == nil {
+		return initLocationArea()
+	}
+	return locationAreaList
+}
+
+func initLocationAreaDetail() *LocationAreaDetail {
+	locationAreaDetail = new(LocationAreaDetail)
+	return locationAreaDetail
+}
+
+func GetLocationAreaDetail() *LocationAreaDetail {
+	if locationAreaDetail == nil {
+		return initLocationAreaDetail()
+	}
+	return locationAreaDetail
+}
+
+func (l *LocationAreaDetail) GetLocationDetail(name string) error {
+	url := baseURL + "location-area/" + name
+	return fetchFromAPI(url, l)
+}
+
+func (l *LocationAreaDetail) GetLocationPokemon(name string) (pokemon []string, err error) {
+	err = l.GetLocationDetail(name)
+	if err != nil {
+		return
+	}
+	for _, p := range l.PokemonEncounters {
+		pokemon = append(pokemon, p.Pokemon.Name)
+	}
+
+	return
 }

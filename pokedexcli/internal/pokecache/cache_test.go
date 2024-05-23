@@ -2,6 +2,7 @@ package pokecache
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -58,4 +59,81 @@ func TestReapLoop(t *testing.T) {
 		t.Errorf("expected to not find key")
 		return
 	}
+}
+
+func TestCache(t *testing.T) {
+	cacheDuration := 100 * time.Millisecond
+	c := NewCache(cacheDuration)
+
+	t.Run("Add and Get cache entry", func(t *testing.T) {
+		key := "testKey"
+		expectedData := []byte("testData")
+		c.Add(key, expectedData)
+
+		data, ok := c.Get(key)
+		if !ok {
+			t.Fatalf("expected key %s to be present in cache", key)
+		}
+		if string(data) != string(expectedData) {
+			t.Fatalf("expected data %s, got %s", expectedData, data)
+		}
+	})
+
+	t.Run("Cache miss", func(t *testing.T) {
+		key := "missingKey"
+		_, ok := c.Get(key)
+		if ok {
+			t.Fatalf("expected key %s to be absent in cache", key)
+		}
+	})
+
+	t.Run("Reap old entries", func(t *testing.T) {
+		key1 := "oldKey"
+		key2 := "newKey"
+		data := []byte("data")
+
+		c.Add(key1, data)
+		time.Sleep(cacheDuration + 10*time.Millisecond)
+		c.Add(key2, data)
+
+		time.Sleep(cacheDuration + 10*time.Millisecond)
+
+		_, ok := c.Get(key1)
+		if ok {
+			t.Fatalf("expected key %s to be reaped from cache", key1)
+		}
+
+		stillInCacheData, stillInCache := c.Get(key2)
+		if !stillInCache {
+			t.Fatalf("expected key %s to be present in cache", key2)
+		}
+		if string(stillInCacheData) != string(data) {
+			t.Fatalf("expected data %s, got %s", data, stillInCacheData)
+		}
+	})
+
+	t.Run("Concurrent access to cache", func(t *testing.T) {
+		var wg sync.WaitGroup
+		key := "concurrentKey"
+		data := []byte("concurrentData")
+		c.Add(key, data)
+
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c.Get(key)
+			}()
+		}
+
+		wg.Wait()
+
+		retrievedData, ok := c.Get(key)
+		if !ok {
+			t.Fatalf("expected key %s to be present in cache", key)
+		}
+		if string(retrievedData) != string(data) {
+			t.Fatalf("expected data %s, got %s", data, retrievedData)
+		}
+	})
 }
