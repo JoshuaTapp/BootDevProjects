@@ -40,3 +40,7 @@ func GetPokemon(name string) (p pokeAPI.Pokemon, b bool) {
 	} 
 	return
 }
+
+func GetPokedex() (*map[string]pokeAPI.Pokemon) {
+	return &caughtPokemon
+}

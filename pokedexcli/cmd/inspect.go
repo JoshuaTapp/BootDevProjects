@@ -86,5 +86,4 @@ func printPokemonDetails(p *pokeAPI.Pokemon) {
 			fmt.Printf("\t- %v\n", t.Type.Name)
 		}
 	}
-	fmt.Println()
 }
