@@ -1,40 +1,55 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-
-*/
 package cmd
 
 import (
 	"fmt"
+	"log"
+	"os"
 
+	"github.com/JoshuaTapp/BootDevProjects/pokedexcli/internal/pokeAPI"
 	"github.com/spf13/cobra"
 )
 
 // exploreCmd represents the explore command
 var exploreCmd = &cobra.Command{
-	Use:   "explore",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Use:   "explore [location]",
+	Short: "explore the provided area's pokemon",
+	Long:  `Something about how to use this cmd`,
+	// Removed the Args validation to use the custom validation below
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("explore called")
+		if err := validateExploreArgs(args); err != nil { // Custom validation
+			fmt.Fprintln(os.Stderr, err) // Print error to stderr
+			cmd.Usage()                  // Show usage help
+		}
+		fmt.Println("Exploring ", args[0], "...")
+		explore(args[0])
 	},
+}
+
+// function to validate the arguments
+func validateExploreArgs(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("you must provide exactly one location name as an argument")
+	}
+	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(exploreCmd)
+}
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// exploreCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// exploreCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+func explore(locationName string) error {
+	pokemon, err := pokeAPI.GetLocationAreaDetail().GetLocationPokemon(locationName)
+	if err != nil {
+		log.Println("error when getting Pokémon at: ", locationName)
+		return err
+	}
+	if len(pokemon) < 1 {
+		fmt.Println("No Pokémon found in ", locationName)
+	} else {
+		fmt.Println("Found Pokémon: ")
+		for _, p := range pokemon {
+			fmt.Println("  - ", p)
+		}
+	}
+	return nil
 }

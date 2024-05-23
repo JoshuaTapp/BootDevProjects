@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/JoshuaTapp/BootDevProjects/pokedexcli/internal/pokeAPI"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +37,8 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	//rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+
+	pokeAPI.GetLocations()
 	cmdLoop()
 }
 
@@ -43,7 +46,7 @@ func cmdLoop() {
 	reader := bufio.NewReader(os.Stdin)
 	errWriter := bufio.NewWriter(os.Stderr)
 	//writer := bufio.NewWriter(os.Stdout)
-	
+
 	for {
 		fmt.Print("pokedex > ")
 		input, err := reader.ReadString('\n')
@@ -55,11 +58,17 @@ func cmdLoop() {
 		input = strings.TrimSpace(input)
 
 		cmd, args, err := rootCmd.Find(strings.Fields(input))
-
+		//log.Default().Printf("CMD: %v, args: %v, error: %v\n", cmd.Short, args, err)
 		if err != nil {
-			fmt.Println("Invalid command: ", err)
-		} else {
-			cmd.Run(cmd, args)
+			fmt.Println(err)
+			fmt.Println("Available Commands:")
+			for _, cmd := range rootCmd.Commands() {
+				fmt.Println("  -", cmd.Name(), ": ", cmd.Short) // Print command names
+			}
+			continue
 		}
+
+		cmd.Run(cmd, args)
+
 	}
 }

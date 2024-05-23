@@ -6,12 +6,6 @@ import (
 	"time"
 )
 
-type PokeCache interface {
-	NewCache(interval time.Duration) *Cache
-	Get(key string) ([]byte, bool)
-	Add(key string, data []byte)
-}
-
 type Cache struct {
 	cache    map[string]cacheEntry
 	interval time.Duration
@@ -25,53 +19,60 @@ type cacheEntry struct {
 }
 
 func NewCache(interval time.Duration) *Cache {
-	log.Default().Println("Cache: Creating New Cache")
 	c := &Cache{
 		cache:    make(map[string]cacheEntry),
 		interval: interval,
 		ticker:   time.NewTicker(interval),
-		lock:     sync.RWMutex{},
 	}
-	go c.reapLoop()
+
+	// Start the reap loop in a separate goroutine
+	go func() {
+		defer c.ticker.Stop()
+		for range c.ticker.C {
+			c.reap()
+		}
+	}()
+
 	return c
 }
 
 func (c *Cache) Get(key string) ([]byte, bool) {
-	log.Default().Printf("Cache: get key:%v", key)
 	c.lock.RLock()
 	defer c.lock.RUnlock()
+
 	entry, ok := c.cache[key]
 	if !ok {
-		log.Default().Println("\t: CACHE MISS!")
+		log.Printf("%s: CACHE MISS", key)
 		return nil, false
 	}
-	log.Default().Println("\t: CACHE HIT!")
+
+	log.Printf("%s: CACHE HIT", key)
 	return entry.data, true
 }
 
 func (c *Cache) Add(key string, data []byte) {
 	c.lock.Lock()
-	log.Default().Printf("Cache: Adding\n\tkey:%v\n", key)
 	defer c.lock.Unlock()
+
 	c.cache[key] = cacheEntry{
 		data:      data,
 		createdAt: time.Now(),
 	}
+
+	log.Printf("Cache: Added key %s", key)
 }
 
-func (c *Cache) reapLoop() {
-	for range c.ticker.C {
-		c.lock.Lock()
-		log.Default().Println("Cache: running reap loop now!")
+func (c *Cache) reap() {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
-		cutoff := time.Now().Add(-c.interval)
-		for k, v := range c.cache {
-			if v.createdAt.Before(cutoff) {
-				delete(c.cache, k)
-			}
+	log.Println("Cache: Running reap loop")
+
+	cutoff := time.Now().Add(-c.interval)
+	for key, entry := range c.cache {
+		if entry.createdAt.Before(cutoff) {
+			delete(c.cache, key)
+			log.Printf("Cache: Entry %s reaped", key)
 		}
-		c.lock.Unlock()
 	}
-	c.ticker.Stop()
-	log.Println("reapLoop stopped")
 }
