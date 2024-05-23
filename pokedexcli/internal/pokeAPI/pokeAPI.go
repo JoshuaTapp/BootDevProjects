@@ -19,7 +19,7 @@ var (
 	locationAreaList   *LocationAreaList
 	locationAreaDetail *LocationAreaDetail
 	cache              *pokecache.Cache
-	pokemon			   *Pokemon
+	pokemon            *Pokemon
 )
 
 type Locations struct {
@@ -384,12 +384,6 @@ type Pokemon struct {
 	} `json:"past_types"`
 }
 
-func init() {
-	initLocationArea()
-	initLocationAreaDetail()
-	initLocations()
-	initPokemon()
-}
 func fetchFromAPI(url string, v interface{}) error {
 	if cache == nil {
 		cache = pokecache.NewCache(time.Minute * 5)
