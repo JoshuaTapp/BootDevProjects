@@ -33,3 +33,10 @@ func AddPokemon(p pokeAPI.Pokemon) error {
 	log.Println("Adding ", name, " to pokedex!")
 	return nil
 }
+
+func GetPokemon(name string) (p pokeAPI.Pokemon, b bool) {
+	if IsCaught(name) {
+		b, p = true, caughtPokemon[name]
+	} 
+	return
+}
