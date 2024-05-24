@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type apiConfig struct {
@@ -21,6 +23,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", cfg.metricsHandler)
 	mux.HandleFunc("GET /api/reset", cfg.resetHandler)
 	mux.HandleFunc("GET /api/healthz", healthHandler)
+	mux.HandleFunc("POST /api/validate_chirp", isValidChirpHandler)
 
 	loggingHandler := loggingMiddleware(mux)
 	srv := &http.Server{
@@ -75,4 +78,86 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		log.Printf("Visited page: %s\n", r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isValidChirpHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	type chirp struct {
+		Body string `json:"body"`
+	}
+
+	// decode chirp
+	decoder := json.NewDecoder(r.Body)
+	c := chirp{}
+	err := decoder.Decode(&c)
+	if err != nil {
+		log.Println("Error decoding params: ", err)
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	if len(c.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	validRespBody := struct {
+		Clean string `json:"cleaned_body"`
+	}{
+		Clean: removeProfanity(c.Body),
+	}
+
+	respondWithJSON(w, http.StatusOK, validRespBody)
+}
+
+func removeProfanity(msg string) string {
+	theProfane := map[string]string{
+		"kerfuffle": "****",
+		"sharbert":  "****",
+		"fornax":    "****",
+	}
+
+	strSlice := strings.Split(msg, " ")
+	log.Print("strSlice: ", strSlice)
+
+	for i, s := range strSlice {
+		lcStr := strings.ToLower(s)
+		if v, ok := theProfane[lcStr]; ok {
+			strSlice[i] = v
+		}
+	}
+
+	return strings.Join(strSlice, " ")
+
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+
+	respBody := struct {
+		Error string `json:"error"`
+	}{
+		Error: msg,
+	}
+
+	rb, err := json.Marshal(&respBody)
+	if err != nil {
+		log.Printf("Error mashalling JSON: %s", err)
+		return
+	}
+	w.Write(rb)
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+
+	rb, err := json.Marshal(&payload)
+	if err != nil {
+		log.Printf("Error mashalling JSON: %s", err)
+		return
+	}
+	w.Write(rb)
 }
