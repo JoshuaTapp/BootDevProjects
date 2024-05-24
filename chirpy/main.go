@@ -12,6 +12,11 @@ type apiConfig struct {
 	fileserverHits int
 }
 
+type chirp struct{
+	Body string `json:"body"`
+	Id	string `json:"id"`
+}
+
 func main() {
 	const port = "8080"
 	cfg := new(apiConfig)
@@ -24,6 +29,8 @@ func main() {
 	mux.HandleFunc("GET /api/reset", cfg.resetHandler)
 	mux.HandleFunc("GET /api/healthz", healthHandler)
 	mux.HandleFunc("POST /api/validate_chirp", isValidChirpHandler)
+	mux.HandleFunc("GET /api/chirps" getChirpHandler)
+	mux.HandleFunc("POST /api/chirps" postChirpHandler)
 
 	loggingHandler := loggingMiddleware(mux)
 	srv := &http.Server{
@@ -81,34 +88,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 }
 
 func isValidChirpHandler(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
 
-	type chirp struct {
-		Body string `json:"body"`
-	}
-
-	// decode chirp
-	decoder := json.NewDecoder(r.Body)
-	c := chirp{}
-	err := decoder.Decode(&c)
-	if err != nil {
-		log.Println("Error decoding params: ", err)
-		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
-		return
-	}
-
-	if len(c.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-		return
-	}
-
-	validRespBody := struct {
-		Clean string `json:"cleaned_body"`
-	}{
-		Clean: removeProfanity(c.Body),
-	}
-
-	respondWithJSON(w, http.StatusOK, validRespBody)
 }
 
 func removeProfanity(msg string) string {
@@ -160,4 +140,40 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 		return
 	}
 	w.Write(rb)
+}
+
+func postChirpHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	type chirp struct {
+		Body string `json:"body"`
+	}
+
+	// decode chirp
+	decoder := json.NewDecoder(r.Body)
+	c := chirp{}
+	err := decoder.Decode(&c)
+	if err != nil {
+		log.Println("Error decoding params: ", err)
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	if len(c.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	validRespBody := chirp{
+		Body: removeProfanity(c.Body),
+		Id: 1,
+	}
+
+	respondWithJSON(w, http.StatusCreated, validRespBody)
+}
+
+func getChirpHandler(w http.ResponseWriter, r *http.Request) {
+	var chirps []chirp
+
+	
 }
