@@ -14,7 +14,7 @@ type apiConfig struct {
 
 type chirp struct{
 	Body string `json:"body"`
-	Id	string `json:"id"`
+	ID	int `json:"id"`
 }
 
 func main() {
@@ -28,9 +28,8 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", cfg.metricsHandler)
 	mux.HandleFunc("GET /api/reset", cfg.resetHandler)
 	mux.HandleFunc("GET /api/healthz", healthHandler)
-	mux.HandleFunc("POST /api/validate_chirp", isValidChirpHandler)
-	mux.HandleFunc("GET /api/chirps" getChirpHandler)
-	mux.HandleFunc("POST /api/chirps" postChirpHandler)
+	mux.HandleFunc("GET /api/chirps", getChirpHandler)
+	mux.HandleFunc("POST /api/chirps", postChirpHandler)
 
 	loggingHandler := loggingMiddleware(mux)
 	srv := &http.Server{
@@ -87,8 +86,8 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func isValidChirpHandler(w http.ResponseWriter, r *http.Request) {
-
+func isValidChirp(c *chirp) (bool, error) {
+	return true, nil
 }
 
 func removeProfanity(msg string) string {
@@ -142,17 +141,15 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(rb)
 }
 
-func postChirpHandler(w http.ResponseWriter, r *http.Request) {
+func decodeJSON(r *http.Request, shape *interface{}) error {
 	defer r.Body.Close()
-
-	type chirp struct {
-		Body string `json:"body"`
-	}
-
-	// decode chirp
 	decoder := json.NewDecoder(r.Body)
-	c := chirp{}
-	err := decoder.Decode(&c)
+	return decoder.Decode(shape)
+}
+
+func postChirpHandler(w http.ResponseWriter, r *http.Request) {
+	c := &chirp{}
+	err := decodeJSON(r, c)
 	if err != nil {
 		log.Println("Error decoding params: ", err)
 		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
@@ -164,7 +161,8 @@ func postChirpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validRespBody := chirp{
+	validRespBody := &chirp{
+		ID: 1,
 		Body: removeProfanity(c.Body),
 		Id: 1,
 	}
@@ -173,7 +171,7 @@ func postChirpHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getChirpHandler(w http.ResponseWriter, r *http.Request) {
-	var chirps []chirp
+	// var chirps []chirp
 
-	
+	return
 }
