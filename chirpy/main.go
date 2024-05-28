@@ -2,22 +2,26 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/JoshuaTapp/BootDevProjects/chirpy/internal/database"
 )
 
 type apiConfig struct {
 	fileserverHits int
 }
 
-type chirp struct{
-	Body string `json:"body"`
-	ID	int `json:"id"`
-}
+var (
+	dbConn *database.DB
+)
 
 func main() {
+	dbConn, _ = database.NewDB("database.json")
+
 	const port = "8080"
 	cfg := new(apiConfig)
 
@@ -86,7 +90,11 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func isValidChirp(c *chirp) (bool, error) {
+func validateChirp(msg string) (bool, error) {
+	if len(msg) > 140 {
+		return false, errors.New("Chirp is too long")
+	}
+
 	return true, nil
 }
 
@@ -141,14 +149,15 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(rb)
 }
 
-func decodeJSON(r *http.Request, shape *interface{}) error {
-	defer r.Body.Close()
+func decodeJSON(r *http.Request, shape interface{}) error {
 	decoder := json.NewDecoder(r.Body)
 	return decoder.Decode(shape)
 }
 
 func postChirpHandler(w http.ResponseWriter, r *http.Request) {
-	c := &chirp{}
+	c := &struct {
+		Body string `json:"body"`
+	}{}
 	err := decodeJSON(r, c)
 	if err != nil {
 		log.Println("Error decoding params: ", err)
@@ -156,22 +165,26 @@ func postChirpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(c.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+	if ok, err := validateChirp(c.Body); !ok {
+		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	validRespBody := &chirp{
-		ID: 1,
-		Body: removeProfanity(c.Body),
-		Id: 1,
+	chirp, err := dbConn.CreateChirp(removeProfanity(c.Body))
+	if err != nil {
+		log.Print("failed to create chirp", err)
+		return
 	}
-
-	respondWithJSON(w, http.StatusCreated, validRespBody)
+	respondWithJSON(w, http.StatusCreated, chirp)
 }
 
 func getChirpHandler(w http.ResponseWriter, r *http.Request) {
-	// var chirps []chirp
+	var chirps []database.Chirp
 
-	return
+	chirps, err := dbConn.GetChirps()
+	if err != nil {
+		log.Print("failure getting chirps", err)
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
 }
