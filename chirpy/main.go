@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/JoshuaTapp/BootDevProjects/chirpy/internal/database"
@@ -20,7 +22,10 @@ var (
 )
 
 func main() {
-	dbConn, _ = database.NewDB("database.json")
+	dbg := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
+
+	dbConn, _ = database.NewDB("database.json", *dbg)
 
 	const port = "8080"
 	cfg := new(apiConfig)
@@ -33,7 +38,10 @@ func main() {
 	mux.HandleFunc("GET /api/reset", cfg.resetHandler)
 	mux.HandleFunc("GET /api/healthz", healthHandler)
 	mux.HandleFunc("GET /api/chirps", getChirpHandler)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", getChirpHandler)
 	mux.HandleFunc("POST /api/chirps", postChirpHandler)
+
+	mux.HandleFunc("POST /api/users", postUsersHandler)
 
 	loggingHandler := loggingMiddleware(mux)
 	srv := &http.Server{
@@ -186,5 +194,36 @@ func getChirpHandler(w http.ResponseWriter, r *http.Request) {
 		log.Print("failure getting chirps", err)
 	}
 
-	respondWithJSON(w, http.StatusOK, chirps)
+	id, err := strconv.Atoi(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithJSON(w, http.StatusOK, chirps)
+		return
+	}
+
+	c, err := dbConn.GetChirp(id)
+	if err != nil {
+		respondWithError(w, 404, "chirp not found")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, c)
+}
+
+func postUsersHandler(w http.ResponseWriter, r *http.Request) {
+	u := &struct {
+		Email string `json:"email"`
+	}{}
+
+	err := decodeJSON(r, u)
+	if err != nil {
+		log.Println("Error decoding params: ", err)
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	user, err := dbConn.CreateUser(u.Email)
+	if err != nil {
+		log.Print("failed to create user", err)
+		return
+	}
+	respondWithJSON(w, 201, user)
 }

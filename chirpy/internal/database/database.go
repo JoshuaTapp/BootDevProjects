@@ -2,6 +2,7 @@ package database
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -15,6 +16,12 @@ type DB struct {
 
 type DBStructure struct {
 	Chirps map[int]Chirp `json:"chirps"`
+	Users  map[int]User  `json:"users"`
+}
+
+type User struct {
+	ID    int    `json:"id"`
+	Email string `json:"email"`
 }
 
 type Chirp struct {
@@ -24,7 +31,7 @@ type Chirp struct {
 
 // NewDB creates a new database connection
 // and creates the database file if it doesn't exist
-func NewDB(path string) (*DB, error) {
+func NewDB(path string, debug bool) (*DB, error) {
 	db := DB{
 		path: path,
 		mux:  new(sync.RWMutex),
@@ -34,11 +41,36 @@ func NewDB(path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if debug {
+		// if debug, overwrite the file!
+		initDB := new(DBStructure)
+		initDB.Chirps = make(map[int]Chirp)
+		initDB.Users = make(map[int]User)
+		err = db.writeDB(*initDB)
+		return &db, err
+	}
 
-	initDB := new(DBStructure)
-	initDB.Chirps = make(map[int]Chirp)
-	err = db.writeDB(*initDB)
 	return &db, err
+}
+
+func (db *DB) CreateUser(email string) (u User, err error) {
+	dbs, err := db.loadDB()
+	if err != nil {
+		return
+	}
+	newID := len(dbs.Users) + 1
+	u = User{
+		Email: email,
+		ID:    newID,
+	}
+
+	dbs.Users[newID] = u
+	err = db.writeDB(dbs)
+	if err != nil {
+		return User{}, err
+	}
+
+	return
 }
 
 // CreateChirp creates a new chirp and saves it to disk
@@ -66,7 +98,7 @@ func (db *DB) CreateChirp(body string) (c Chirp, err error) {
 func (db *DB) GetChirps() (chirps []Chirp, err error) {
 	dbs, err := db.loadDB()
 	if err != nil {
-		log.Printf("failed to load during getChirps: %v", dbs, err)
+		log.Printf("failed to load during getChirps: %v", dbs)
 		return
 	}
 
@@ -77,6 +109,23 @@ func (db *DB) GetChirps() (chirps []Chirp, err error) {
 	log.Println("GOT CHIRPS:", chirps, err)
 
 	return
+}
+
+// GetChirps returns all chirps in the database
+func (db *DB) GetChirp(ID int) (chirp Chirp, err error) {
+	dbs, err := db.loadDB()
+	if err != nil {
+		log.Printf("failed to load during getChirps: %v", dbs)
+		return
+	}
+
+	if _, ok := dbs.Chirps[ID]; !ok {
+		return chirp, errors.New("chirp does not exist")
+	}
+
+	log.Printf("requested ID: %v |\tChirp: %v", ID, dbs.Chirps[ID])
+	return dbs.Chirps[ID], nil
+
 }
 
 // ensureDB creates a new database file if it doesn't exist
