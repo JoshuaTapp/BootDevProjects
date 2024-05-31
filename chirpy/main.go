@@ -7,28 +7,41 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/JoshuaTapp/BootDevProjects/chirpy/internal/database"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type apiConfig struct {
 	fileserverHits int
+	jwtSecret      []byte
+	db             *database.DB
 }
 
 var (
-	dbConn *database.DB
+	cfg apiConfig
 )
+
+const accessTokenInterval int = 60 * 60 // 1 hour
+const refreshTokenInterval int = 60 * 24 * 60 * 60 // 60 Days
 
 func main() {
 	dbg := flag.Bool("debug", false, "Enable debug mode")
 	flag.Parse()
 
-	dbConn, _ = database.NewDB("database.json", *dbg)
-
-	const port = "8080"
-	cfg := new(apiConfig)
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+	cfg.jwtSecret = []byte(os.Getenv("JWT_SECRET"))
+	log.Print(cfg.jwtSecret)
+	cfg.db, _ = database.NewDB("database.json", *dbg)
 
 	mux := http.NewServeMux()
 	fileServer := http.FileServer(http.Dir("."))
@@ -39,11 +52,15 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthHandler)
 	mux.HandleFunc("GET /api/chirps", getChirpHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", getChirpHandler)
-	mux.HandleFunc("POST /api/chirps", postChirpHandler)
 
+	mux.HandleFunc("POST /api/chirps", postChirpHandler)
 	mux.HandleFunc("POST /api/users", postUsersHandler)
+	mux.HandleFunc("POST /api/login", postLoginHandler)
+
+	mux.HandleFunc("PUT /api/users", putUsersHandler)
 
 	loggingHandler := loggingMiddleware(mux)
+	const port = "8080"
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: loggingHandler,
@@ -93,7 +110,7 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Visited page: %s\n", r.URL.Path)
+		log.Printf("Visited page: %v - %s\n", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -178,7 +195,7 @@ func postChirpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chirp, err := dbConn.CreateChirp(removeProfanity(c.Body))
+	chirp, err := cfg.db.CreateChirp(removeProfanity(c.Body))
 	if err != nil {
 		log.Print("failed to create chirp", err)
 		return
@@ -189,7 +206,7 @@ func postChirpHandler(w http.ResponseWriter, r *http.Request) {
 func getChirpHandler(w http.ResponseWriter, r *http.Request) {
 	var chirps []database.Chirp
 
-	chirps, err := dbConn.GetChirps()
+	chirps, err := cfg.db.GetChirps()
 	if err != nil {
 		log.Print("failure getting chirps", err)
 	}
@@ -200,7 +217,7 @@ func getChirpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := dbConn.GetChirp(id)
+	c, err := cfg.db.GetChirp(id)
 	if err != nil {
 		respondWithError(w, 404, "chirp not found")
 		return
@@ -210,7 +227,8 @@ func getChirpHandler(w http.ResponseWriter, r *http.Request) {
 
 func postUsersHandler(w http.ResponseWriter, r *http.Request) {
 	u := &struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}{}
 
 	err := decodeJSON(r, u)
@@ -220,10 +238,147 @@ func postUsersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := dbConn.CreateUser(u.Email)
+	user, err := cfg.db.CreateUser(u.Email, u.Password)
 	if err != nil {
 		log.Print("failed to create user", err)
 		return
 	}
-	respondWithJSON(w, 201, user)
+
+	// remove password field from response
+	response := struct {
+		Email string `json:"email"`
+		ID    int    `json:"id"`
+	}{
+		Email: user.Email,
+		ID:    user.ID,
+	}
+
+	respondWithJSON(w, 201, response)
+}
+
+func postLoginHandler(w http.ResponseWriter, r *http.Request) {
+	u := &struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Expires  int    `json:"expires_in_seconds,omitempty"`
+	}{}
+
+	err := decodeJSON(r, u)
+	if err != nil {
+		log.Println("Error decoding params: ", err)
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	user, err := cfg.db.GetUser(u.Email)
+	if err != nil {
+		log.Print("failed to login", err)
+		respondWithError(w, 401, "invalid user")
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword(user.Password, []byte(u.Password))
+	if err != nil {
+		// passwords do not match
+		respondWithError(w, 401, "invalid password")
+		return
+	}
+
+	if u.Expires < 1 || u.Expires >= accessTokenInterval {
+		u.Expires = accessTokenInterval
+	}
+
+	claims := &jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(time.Duration(u.Expires) * time.Second)),
+		Subject:   strconv.Itoa(user.ID),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	ss, err := token.SignedString(cfg.jwtSecret)
+	if err != nil {
+		log.Print("signing failed!", err)
+		respondWithError(w, http.StatusInternalServerError, "signing failed")
+
+	}
+
+	// remove password field from response
+	response := struct {
+		Email string `json:"email"`
+		ID    int    `json:"id"`
+		Token string `json:"token"`
+	}{
+		Email: user.Email,
+		ID:    user.ID,
+		Token: ss,
+	}
+
+	respondWithJSON(w, 200, response)
+}
+
+func putUsersHandler(w http.ResponseWriter, r *http.Request) {
+	// get token and verify auth
+
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		log.Println("Error: token not provided")
+	}
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	log.Println("Token String:", tokenString)
+
+	claims := &jwt.RegisteredClaims{}
+
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+
+		return cfg.jwtSecret, nil
+	})
+	if err != nil {
+		log.Printf("failed to parse token: %v", err)
+		respondWithError(w, 401, "invalid token - parse error")
+		return
+	}
+
+	if !token.Valid {
+		respondWithError(w, 401, "invalid token")
+		return
+	}
+
+	id, err := token.Claims.GetSubject()
+	if err != nil {
+		respondWithError(w, 401, "no user id provided in jwt")
+		return
+	}
+
+	u := &struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}{}
+	err = decodeJSON(r, u)
+	if err != nil {
+		log.Println("Error decoding params: ", err)
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	id2, err := strconv.Atoi(id)
+	if err != nil {
+		respondWithError(w, 401, "invalid userID")
+	}
+	user := database.User{
+		Email:    u.Email,
+		Password: []byte(u.Password),
+		ID:       id2,
+	}
+
+	user, err = cfg.db.UpdateUser(id2, user)
+	// remove password field from response
+	response := struct {
+		Email string `json:"email"`
+		ID    int    `json:"id"`
+	}{
+		Email: user.Email,
+		ID:    user.ID,
+	}
+
+	respondWithJSON(w, 200, response)
 }

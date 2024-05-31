@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"sync"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type DB struct {
@@ -20,8 +22,9 @@ type DBStructure struct {
 }
 
 type User struct {
-	ID    int    `json:"id"`
-	Email string `json:"email"`
+	ID       int    `json:"id"`
+	Email    string `json:"email"`
+	Password []byte `json:"password"`
 }
 
 type Chirp struct {
@@ -53,15 +56,20 @@ func NewDB(path string, debug bool) (*DB, error) {
 	return &db, err
 }
 
-func (db *DB) CreateUser(email string) (u User, err error) {
+func (db *DB) CreateUser(email, password string) (u User, err error) {
 	dbs, err := db.loadDB()
 	if err != nil {
 		return
 	}
 	newID := len(dbs.Users) + 1
+	hashPW, err := bcrypt.GenerateFromPassword([]byte(password), 10) // default cost
+	if err != nil {
+		log.Fatal("password hashing failed!", password, hashPW)
+	}
 	u = User{
-		Email: email,
-		ID:    newID,
+		Email:    email,
+		ID:       newID,
+		Password: hashPW,
 	}
 
 	dbs.Users[newID] = u
@@ -71,6 +79,72 @@ func (db *DB) CreateUser(email string) (u User, err error) {
 	}
 
 	return
+}
+
+func (db *DB) GetUser(email string) (u User, err error) {
+	dbs, err := db.loadDB()
+	if err != nil {
+		return u, err
+	}
+
+	// this is dumb implementation, i should use emails instead for key...
+	for _, v := range dbs.Users {
+		if v.Email == email {
+			u = v
+			break
+		}
+	}
+	if u.Email == "" {
+		err = errors.New("user not found")
+	}
+
+	return
+}
+
+func (db *DB) GetUserById(id int) (u User, err error) {
+	dbs, err := db.loadDB()
+	if err != nil {
+		return u, err
+	}
+
+	u, ok := dbs.Users[id]
+	if !ok {
+		return User{}, errors.New("user not found")
+	}
+
+	return u, nil
+}
+
+func (db *DB) UpdateUser(id int, user User) (User, error) {
+	userOld, err := db.GetUserById(id)
+	if err != nil {
+		return userOld, err
+	}
+
+	if user.Email != "" {
+		userOld.Email = user.Email
+	}
+	if len(user.Password) > 0 {
+		hashPW, err := bcrypt.GenerateFromPassword([]byte(user.Password), 10) // default cost
+		if err != nil {
+			log.Fatal("password hashing failed!", user.Password, hashPW)
+		}
+		user.Password = hashPW
+	}
+	user.ID = id
+
+	dbs, err := db.loadDB()
+	if err != nil {
+		return userOld, err
+	}
+
+	dbs.Users[id] = user
+	err = db.writeDB(dbs)
+	if err != nil {
+		return userOld, err
+	}
+
+	return user, nil
 }
 
 // CreateChirp creates a new chirp and saves it to disk
