@@ -1,6 +1,8 @@
 package database
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,9 +24,10 @@ type DBStructure struct {
 }
 
 type User struct {
-	ID       int    `json:"id"`
-	Email    string `json:"email"`
-	Password []byte `json:"password"`
+	ID           int    `json:"id"`
+	Email        string `json:"email"`
+	Password     []byte `json:"password"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type Chirp struct {
@@ -262,4 +265,30 @@ func (db *DB) writeDB(dbs DBStructure) error {
 
 	return nil
 
+}
+
+func (db *DB) refreshUserRefreshToken(userID int) error {
+	// generate new random 32 byte token
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Print("error refreshing token: ", err)
+		return err
+	}
+	token := hex.EncodeToString(b)
+
+	// assign new token to user
+	dbs, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	if u, ok := dbs.Users[userID]; ok {
+		u.RefreshToken = token
+		dbs.Users[userID] = u
+		return db.writeDB(dbs)
+	} 
+	
+	return errors.New("can not refresh token because user does not exist")
+	
 }

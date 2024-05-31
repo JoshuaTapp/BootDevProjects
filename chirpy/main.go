@@ -28,7 +28,7 @@ var (
 	cfg apiConfig
 )
 
-const accessTokenInterval int = 60 * 60 // 1 hour
+const accessTokenInterval int = 60 * 60            // 1 hour
 const refreshTokenInterval int = 60 * 24 * 60 * 60 // 60 Days
 
 func main() {
@@ -56,6 +56,8 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", postChirpHandler)
 	mux.HandleFunc("POST /api/users", postUsersHandler)
 	mux.HandleFunc("POST /api/login", postLoginHandler)
+	mux.HandleFunc("POST /api/refresh", refreshTokenHandler)
+	mux.HandleFunc("POST /api/revoke", revokeTokenHandler)
 
 	mux.HandleFunc("PUT /api/users", putUsersHandler)
 
@@ -305,13 +307,15 @@ func postLoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// remove password field from response
 	response := struct {
-		Email string `json:"email"`
-		ID    int    `json:"id"`
-		Token string `json:"token"`
+		Email        string `json:"email"`
+		ID           int    `json:"id"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}{
 		Email: user.Email,
 		ID:    user.ID,
 		Token: ss,
+		RefreshToken: "CHANGE", // CHANGE THIS TO CORRECT 
 	}
 
 	respondWithJSON(w, 200, response)
@@ -381,4 +385,12 @@ func putUsersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJSON(w, 200, response)
+}
+
+func refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func revokeTokenHandler(w http.ResponseWriter, r *http.Request) {
+
 }
