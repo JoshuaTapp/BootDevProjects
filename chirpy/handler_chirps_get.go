@@ -34,8 +34,14 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	id, err := strconv.Atoi(r.URL.Query().Get("author_id"))
+
 	chirps := []Chirp{}
 	for _, dbChirp := range dbChirps {
+		if err == nil && dbChirp.AuthorID != id {
+			continue
+		}
+
 		chirps = append(chirps, Chirp{
 			ID:       dbChirp.ID,
 			Body:     dbChirp.Body,
@@ -43,8 +49,13 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
+	sortType := r.URL.Query().Get("sort")
 	sort.Slice(chirps, func(i, j int) bool {
-		return chirps[i].ID < chirps[j].ID
+		if sortType == "desc" {
+			return chirps[i].ID >= chirps[j].ID
+		} else {
+			return chirps[i].ID < chirps[j].ID
+		}
 	})
 
 	respondWithJSON(w, http.StatusOK, chirps)
