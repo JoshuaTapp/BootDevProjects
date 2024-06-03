@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/JoshuaTapp/BootDevProjects/chirpy/internal/auth"
-	
 )
 
 func (cfg *apiConfig) handlerUsersUpdate(w http.ResponseWriter, r *http.Request) {
@@ -57,8 +56,9 @@ func (cfg *apiConfig) handlerUsersUpdate(w http.ResponseWriter, r *http.Request)
 
 	respondWithJSON(w, http.StatusOK, response{
 		User: User{
-			ID:    user.ID,
-			Email: user.Email,
+			ID:          user.ID,
+			Email:       user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		},
 	})
 }
